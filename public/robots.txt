@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+Allow: /blog
+Allow: /about
+Allow: /contact
+Allow: /privacy-policy
+Allow: /terms
+Allow: /help
+Disallow: /admin/
+Disallow: /s/
+
+Sitemap: https://lokataut.com/sitemap.xml
+

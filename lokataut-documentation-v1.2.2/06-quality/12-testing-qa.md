@@ -1,0 +1,247 @@
+# Testing Strategy & Quality Assurance Plan — LokaTaut
+
+| Atribut | Nilai |
+|---|---|
+| **Document ID** | DOC-12 |
+| **Versi** | 1.2.2 |
+| **Status** | UNDER REVIEW (Ready for Product Owner Final Review) |
+| **Terakhir Diperbarui** | 31 Oktober 2026 |
+| **Penulis** | Senior QA Engineer & Test Automation Specialist |
+| **Target Pembaca** | AI Coding Agent, QA Tester, Software Engineer |
+| **Tujuan** | Menetapkan rencana pengujian menyeluruh, skenario automated test berbasis Laravel 13 (PHPUnit 11 / Pest 3), penanganan kasus negatif/edge cases, dan acceptance criteria sebelum rilis produksi. |
+
+---
+
+## Dependensi Dokumen
+
+| Dokumen | Relasi |
+|---|---|
+| [DOC-02 — Product Requirements Document](../01-product/02-prd.md) | Sumber kebutuhan fungsional (FR) dan aturan bisnis (BR) |
+| [DOC-03 — Scope & Requirements Specification](../01-product/03-scope-requirements.md) | Matriks keterlacakan kebutuhan ke test case |
+| [DOC-06 — Database Design](../03-architecture/06-database-design.md) | Kebijakan penghapusan dan retensi data |
+| [DOC-07 — Technical Specification](../03-architecture/07-technical-specification.md) | Arsitektur kode dan kontrak routing untuk pengujian |
+| [DOC-09 — Security & Privacy](../05-security-monetization/09-security-privacy.md) | Kriteria pengujian keamanan, hashed token, dan Turnstile |
+| [REQUIREMENT-TRACEABILITY-MATRIX.md](../REQUIREMENT-TRACEABILITY-MATRIX.md) | Matriks keterlacakan 100% dua arah tanpa orphan test |
+| [AGENTS.md](../../AGENTS.md) | Kewajiban eksekusi test riil sebelum menandai pekerjaan selesai |
+
+---
+
+## Status Siklus Uji (Lifecycle Test Status Legend)
+
+Sesuai aturan operasional `AGENTS.md`, status pengujian dibedakan secara tegas:
+- **Status Dokumentasi:** `DOCUMENTED` (Telah dirancang dan disetujui dalam spesifikasi).
+- **Status Implementasi:** `NOT IMPLEMENTED` (Belum ada kode sumber) $\rightarrow$ `IMPLEMENTED` (Kode fitur & test class selesai ditulis).
+- **Status Eksekusi:** `NOT RUN` (Belum dieksekusi) $\rightarrow$ `EXECUTED` (Sedang/telah dieksekusi) $\rightarrow$ `PASSED` / `FAILED`.
+
+> **PERINGATAN OPERASIONAL:**  
+> Pada fase pra-koding (Phase 0), **SELURUH TEST CASE BERSTATUS `DOCUMENTED` DAN `NOT RUN`**. Dilarang keras mengklaim atau menyatakan test suite "100% PASSED" sebelum fase implementasi kode dan eksekusi riil `php artisan test` dijalankan.
+
+---
+
+## 1. Test Registry Menyeluruh (Skenario Uji Kritis P0 & P1)
+
+### 1.1 Modul Autentikasi & Profil Admin (`TEST-AUTH-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-AUTH-001** | Login admin dengan kredensial valid | Database memiliki akun admin seeder | POST `/login` dengan email & password terdaftar | HTTP 302 ke `/admin`, session autentikasi aktif, `last_login_at` terupdate | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AUTH-002** | Login admin dengan password salah | Database memiliki akun admin | POST `/login` dengan password keliru | HTTP 302 kembali ke `/login`, pesan error 'Kredensial tidak cocok', sesi tamu | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AUTH-003** | Throttling brute-force login | Route login aktif | Lakukan POST `/login` gagal 5x berturut-turut dalam 1 menit | Percobaan ke-6 menghasilkan HTTP 429 Too Many Requests | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AUTH-004** | Single session enforcement | Admin login di Perangkat A | Admin login di Perangkat B dengan akun sama | Sesi di Perangkat A otomatis invalidated saat melakukan request berikutnya | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AUTH-005** | Logout admin mengakhiri sesi | Admin dalam kondisi login | POST `/logout` dengan CSRF token valid | Sesi dihapus, session ID diregenerasi, redirect ke `/login` | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AUTH-006** | Admin Password Change sukses | Admin login, akses `/admin/profile` | PUT `/admin/profile/password` dengan `current_password` valid dan password baru kompleks (12+ char) | HTTP 302 kembali dengan pesan sukses, password ter-hash baru di DB, sesi login diregenerasi | P1 | DOCUMENTED | NOT RUN |
+| **TEST-AUTH-007** | Admin Password Change gagal (password lama salah) | Admin login | PUT `/admin/profile/password` dengan `current_password` salah | HTTP 302 kembali dengan error validasi, password di DB tidak berubah, insiden dicatat di `security_logs` | P1 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.2 Modul Dashboard Admin (`TEST-DASH-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-DASH-001** | Agregasi kartu metrik ringkasan dashboard | Database memuat tautan dan data `daily_stats` | GET `/admin` sebagai admin terautentikasi | HTTP 200, view menampilkan Total Link, Total Tayangan Hari Ini, Unduhan Selesai, dan Completion Rate % | P0 | DOCUMENTED | NOT RUN |
+| **TEST-DASH-002** | Tampilan tren kunjungan 7 hari & tautan terbaru | Database memuat data rekap 7 hari | GET `/admin` | HTTP 200, grafik 7 hari terisi data numerik valid, tabel 5 link terbaru ter-render rapi | P1 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.3 Modul Manajemen Link (`TEST-LINK-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-LINK-001** | Pembuatan link baru dengan random slug | Admin terautentikasi | Submit POST `/admin/links` dengan `destination_url` valid tanpa custom slug | Record tersimpan di DB, slug acak 6-8 char alfanumerik unik, `destination_url` terenkripsi AES-256 | P0 | DOCUMENTED | NOT RUN |
+| **TEST-LINK-002** | Pembuatan link dengan custom slug unik | Admin terautentikasi | Submit custom slug `photoshop-2026` | Record tersimpan dengan slug `photoshop-2026` | P1 | DOCUMENTED | NOT RUN |
+| **TEST-LINK-003** | Validasi penolakan custom slug duplikat | Slug `tools-2026` sudah terdaftar | Submit slug `tools-2026` kembali | Respon error validasi 422: 'Slug sudah digunakan' | P0 | DOCUMENTED | NOT RUN |
+| **TEST-LINK-004** | Validasi skema URL tujuan berbahaya | Admin terautentikasi | Submit `destination_url` = `javascript:alert(1)` atau `file:///etc/passwd` | Validasi gagal 422, ditolak sistem (wajib protokol `http://` atau `https://`) | P0 | DOCUMENTED | NOT RUN |
+| **TEST-LINK-005** | Toggle status link aktif / nonaktif | Link berstatus active | Kirim PATCH `/admin/links/{id}/toggle` | Status kolom pada DB berubah menjadi `inactive`; akses publik merespon HTTP 404 | P0 | DOCUMENTED | NOT RUN |
+| **TEST-LINK-006** | Soft delete link mempertahankan relasi analitik | Link memiliki 50 visits & data daily_stats | Kirim DELETE `/admin/links/{id}` (Soft Delete) | Kolom `deleted_at` terisi; akses safelink merespon 404/410; data pada `visits` dan `daily_stats` utuh | P0 | DOCUMENTED | NOT RUN |
+| **TEST-LINK-007** | Hard delete (Force Delete) link dari Trash | Link telah di-soft-delete | Kirim DELETE `/admin/links/{id}/force` | Baris `links` dihapus; `visitor_sessions` di-cascade; `visits.link_id` menjadi NULL (`ON DELETE SET NULL`); `daily_stats.link_id` menjadi NULL dengan snapshot `link_slug` tetap terbaca | P1 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.4 Modul Safelink Engine & Alur Pengunjung (`TEST-SAFE-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-SAFE-001** | Akses shortlink valid oleh pengunjung | Link aktif tersedia | GET `/s/{slug}` | HTTP 200, session dibuat dengan `token_hash = sha256($rawToken)` di DB, raw token di view, event `impression` dicatat, header `X-LiteSpeed-Cache-Control: no-cache` terpasang | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-002** | Akses shortlink tidak terdaftar | Slug tidak ada di DB | GET `/s/tidak-ada-123` | HTTP 404 (Render invalid.blade.php) | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-003** | Akses shortlink kadaluwarsa | Link memiliki `expires_at` < NOW() | GET `/s/{slug}` | HTTP 410 (Render expired.blade.php) | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-004** | Verifikasi Turnstile berhasil | Sesi safelink aktif | POST `/s/{slug}/verify` dengan turnstile token valid (Mock HTTP 200) | JSON `{ success: true, countdown_seconds: 10 }`, DB `turnstile_verified = true`, `countdown_started_at = NOW()` | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-005** | Eksekusi redirect sah setelah countdown selesai | Sesi verified, waktu berlalu >= 10 detik | POST `/s/{slug}/proceed` dengan `$rawToken` | HTTP 302 Found dengan header `Location: destination_url` terdekripsi, `completed = true` | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-006** | **(KRITIS) Tolak Bypass Countdown via JS** | Sesi verified baru 2 detik | POST `/s/{slug}/proceed` | **HTTP 422 Unprocessable Entity: Bypass Rejected**, insiden dicatat di `security_logs` | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-007** | **(KRITIS) Tolak Replay Token yang Telah Digunakan** | Sesi sudah berstatus `completed = true` | POST `/s/{slug}/proceed` kedua kalinya | **HTTP 422: Token Already Consumed**, redirect ditolak via atomic update | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-008** | Tolak proceed tanpa verifikasi Turnstile | Sesi berstatus `turnstile_verified = false` | POST `/s/{slug}/proceed` | **HTTP 422: Bot Verification Required** | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-009** | Penanganan respon Turnstile tidak valid | Sesi aktif | POST `/s/{slug}/verify` dengan token bot palsu (Mock Turnstile returns `success: false`) | HTTP 422: Verifikasi bot gagal, status `turnstile_verified` tetap false | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-010** | Penanganan Turnstile API Timeout / Gangguan Jaringan | Sesi aktif | POST `/s/{slug}/verify` saat API Cloudflare mengalami cURL timeout / 504 | HTTP 503 dengan pesan ramah agar pengunjung mengulang verifikasi bot | P1 | DOCUMENTED | NOT RUN |
+| **TEST-SAFE-011** | Penolakan sesi kedaluwarsa (Expired Token) | Sesi dibuat > 30 menit lalu | POST `/s/{slug}/proceed` dengan rawToken | HTTP 422 / 410: Sesi telah kedaluwarsa, wajib memuat ulang halaman | P0 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.5 Modul Manajemen Iklan & Kepatuhan Monetisasi (`TEST-ADS-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-ADS-001** | Simpan script kode iklan banner baru | Admin terautentikasi | Submit script tag Adsterra Banner 300x250 ke slot `above_timer` | Record tersimpan di DB, audit log modifikasi dicatat di `security_logs` | P0 | DOCUMENTED | NOT RUN |
+| **TEST-ADS-002** | Toggle nonaktifkan slot iklan | Slot iklan berstatus aktif | Admin matikan slot `header` | Slot iklan tersebut tidak dirender sama sekali pada view halaman `/s/{slug}` | P1 | DOCUMENTED | NOT RUN |
+| **TEST-ADS-003** | Sterilisasi tombol navigasi dari skrip iklan | Halaman safelink dimuat dengan iklan aktif | Inspeksi DOM elemen `#proceed-btn` | Tombol navigasi tidak terikat event listener pihak ketiga atau link popunder (Anti-IVT compliant) | P1 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.6 Modul Analitik & Agregasi (`TEST-ANAL-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-ANAL-001** | Pencatatan event kunjungan & pseudonimisasi IP | Request masuk ke safelink | Pemicuan event `impression`, `verified`, `completed` | Record masuk ke tabel `visits` dengan kolom `ip_hash` terenkripsi HMAC (`ANALYTICS_SALT`), IP mentah tidak tersimpan | P0 | DOCUMENTED | NOT RUN |
+| **TEST-ANAL-002** | Filter analitik & rasio penyelesaian | Data `daily_stats` tersedia | Akses `/admin/analytics?date_from=...&date_to=...` | HTTP 200, perhitungan rasio completions/impressions akurat sesuai rentang tanggal | P1 | DOCUMENTED | NOT RUN |
+| **TEST-ANAL-003** | Penanganan ketiadaan ANALYTICS_SALT di production | Environment `APP_ENV=production` & `ANALYTICS_SALT` kosong | Inisiasi service pencatatan kunjungan | Melempar `\RuntimeException: ANALYTICS_SALT environment variable is required in production`, mencegah logging IP dengan salt kosong | P0 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.7 Modul Pengaturan & Keamanan (`TEST-SET-*` & `TEST-SEC-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-SET-001** | Update pengaturan umum platform | Admin terautentikasi | PUT `/admin/settings` mengubah nama platform dan countdown default | Pengaturan terupdate di DB dan cache settings ter-flush | P1 | DOCUMENTED | NOT RUN |
+| **TEST-SET-002** | Update credentials Turnstile | Admin terautentikasi | PUT `/admin/settings` mengubah site key dan secret key | Data terupdate, validasi format string aman | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SET-003** | Turnstile Emergency Bypass Mode | Turnstile API Cloudflare mengalami downtime | Admin ubah `turnstile_mode = emergency_bypass` di settings | Safelink meloloskan verifikasi bot tanpa memanggil API Cloudflare; audit log tercatat | P1 | DOCUMENTED | NOT RUN |
+| **TEST-SEC-001** | Pencegahan Stored XSS via Unauthorized User | User unauthenticated | Kirim PUT `/admin/ads/{id}` dengan script berbahaya | Ditolak seketika oleh middleware auth (HTTP 302 ke login) | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SEC-002** | Verifikasi Penyimpanan Hashed Session Token | Sesi safelink baru dibuat | Query database `visitor_sessions` | Kolom `token_hash` berisi string SHA-256 64-karakter, tidak ada plaintext raw token di database | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SEC-003** | Simulasi serbuan konkuren (Race Condition) | 1 sesi sah ready to proceed | Kirim 5 request POST `/s/{slug}/proceed` serentak | Tepat 1 request berhasil HTTP 302, 4 request lainnya gagal HTTP 422 (Atomic check) | P0 | DOCUMENTED | NOT RUN |
+| **TEST-SEC-004** | Pencatatan audit log peristiwa kritis | Terjadi login gagal, ubah password, atau ubah iklan | Query tabel `security_logs` | Event tercatat dengan IP asli, user-agent, dan detail insiden JSON | P1 | DOCUMENTED | NOT RUN |
+| **TEST-SEC-005** | Rate Limiting IP publik pada safelink | IP mengirim request masif | Kirim 65 request dalam 1 menit ke `/s/{slug}` dari 1 IP | Request ke-61 menerima HTTP 429 Too Many Requests | P0 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.8 Scheduled Maintenance & Resilience (`TEST-CLI-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-CLI-001** | Agregasi analitik harian (termasuk soft-deleted) | Tabel `visits` terisi; 1 link di-soft delete pukul 14:00 | Jalankan Artisan `php artisan lokataut:aggregate-daily` | Data teragregasi ke `daily_stats`, kunjungan link yang telah di-soft-delete tetap terhitung via `Link::withTrashed()` | P1 | DOCUMENTED | NOT RUN |
+| **TEST-CLI-002** | Pembersihan sesi kadaluwarsa | Sesi `visitor_sessions` > 24 jam tersedia | Jalankan Artisan `php artisan lokataut:prune-sessions` | Record sesi kadaluwarsa terhapus dari database | P1 | DOCUMENTED | NOT RUN |
+| **TEST-CLI-003** | Pembersihan file cache usang (Inode Pruning) | Folder `storage/framework/cache/data` terisi file usang | Jalankan Artisan `php artisan lokataut:prune-cache` | File cache dengan usia > 7 hari terhapus, kuota inode cPanel terjaga | P1 | DOCUMENTED | NOT RUN |
+| **TEST-CLI-004** | Pembersihan log kunjungan historis (> 90 hari) | Terdapat rekaman `visits` > 90 hari | Jalankan Artisan `php artisan lokataut:prune-visits` | Record lama terhapus, data `daily_stats` permanen tidak terpengaruh | P1 | DOCUMENTED | NOT RUN |
+| **TEST-CLI-005** | Agregasi retry / backfill idempoten dengan opsi tanggal | Data tanggal 2026-10-25 belum teragregasi penuh | Jalankan `php artisan lokataut:aggregate-daily --date=2026-10-25` dua kali berturut-turut | Data ter-update tanpa menduplikasi baris (idempoten via `updateOrCreate`) | P1 | DOCUMENTED | NOT RUN |
+| **TEST-CLI-006** | Pencegahan scheduler overlap (Overlap Prevention) | Proses agregasi pertama masih berjalan | Jalankan proses kedua sebelum proses pertama selesai | Proses kedua ditahan/dilewati via `withoutOverlapping(60)` | P1 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.9 Database Integrity & Aggregation Resilience (`TEST-AGG-*`, `TEST-RET-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-AGG-001** | Daily stats duplicate prevention via `(aggregate_key, date)` | Database aktif; data tanggal T sudah teragregasi | Coba masukkan baris baru ke `daily_stats` dengan `(aggregate_key, date)` yang sama | Database melempar error duplicate key SQLSTATE[23000]; constraint NOT NULL mencegah baris ganda | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AGG-002** | Hard delete tautan sebelum agregasi harian dijalankan | Tautan memiliki event di `visits` hari ini; tautan di-hard-delete pada pukul 15:00 | Jalankan `php artisan lokataut:aggregate-daily` pada pukul 00:05 | Event tetap teragregasi ke `daily_stats` dengan `aggregate_key = 'link:{id}'`, `link_id = NULL`, dan `link_slug` sesuai snapshot asli | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AGG-003** | Hard delete tautan setelah agregasi harian selesai | Tautan telah diagregasi ke `daily_stats` kemarin; tautan di-hard-delete hari ini | Eksekusi hard delete tautan dari trash | `daily_stats.link_id` menjadi NULL via `ON DELETE SET NULL`, namun baris agregat, `aggregate_key`, dan `link_slug` tetap utuh 100% | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AGG-004** | Idempotensi retry agregasi harian (Retry Aggregation) | Agregasi tanggal T telah selesai dijalankan | Jalankan ulang `php artisan lokataut:aggregate-daily --date=T` sebanyak 3 kali berturut-turut | Jumlah baris di `daily_stats` tidak bertambah, nilai metrik tetap akurat, tidak ada duplikasi data | P0 | DOCUMENTED | NOT RUN |
+| **TEST-AGG-005** | Agregasi kunjungan dengan null link_id / unassigned | Terdapat rekaman `visits` tanpa referensi link sah (`link_id_snapshot = 0`) | Jalankan `php artisan lokataut:aggregate-daily` | Metrik tercatat pada bucket `aggregate_key = 'system:unassigned'`, `link_id = NULL`, `link_slug = 'unassigned'` | P1 | DOCUMENTED | NOT RUN |
+| **TEST-AGG-006** | Preservasi slug historis setelah hard delete tautan | Tautan 'promo-liburan' diagregasi, lalu di-hard delete | Query riwayat analitik via `AnalyticsService` | Grafik dan tabel tetap menampilkan slug 'promo-liburan' berbasis snapshot `daily_stats.link_slug` | P1 | DOCUMENTED | NOT RUN |
+| **TEST-AGG-007** | Simulasi agregasi konkuren & unique key collision prevention | Data visits terisi masif | Jalankan 2 instance `AggregateDailyStatsCommand` secara konkuren | Satu instance menyelesaikan upsert, instance lain ditahan oleh overlap protection atau menangani unique key collision secara graceful | P1 | DOCUMENTED | NOT RUN |
+| **TEST-RET-001** | Retensi dan pembersihan visits (> 90 hari) setelah tautan di-hard-delete | Terdapat event `visits` berusia 95 hari dengan `link_id = NULL` (link sudah di-hard delete) | Jalankan `php artisan lokataut:prune-visits` | Seluruh rekaman `visits` > 90 hari terhapus bersih terlepas dari apakah `link_id` NULL atau tidak; `daily_stats` tetap aman | P1 | DOCUMENTED | NOT RUN |
+
+---
+
+### 1.10 Kinerja, UX, & Integritas Operasional (`TEST-PERF-*`, `TEST-UX-*`, `TEST-REG-*`)
+
+| Test ID | Skenario Pengujian | Precondition | Langkah Pengujian | Hasil yang Diharapkan | Prioritas | Status Dok. | Status Eksekusi |
+|---|---|---|---|---|:---:|:---:|:---:|
+| **TEST-PERF-001** | Waktu respon halaman safelink < 200ms | Server lokal aktif | Benchmark HTTP GET `/s/{slug}` dengan 50 concurrent requests | Rata-rata waktu respon server-side < 200 ms | P1 | DOCUMENTED | NOT RUN |
+| **TEST-PERF-002** | Verifikasi header anti-cache LiteSpeed | Route publik safelink | Inspeksi header respon dari `GET /s/{slug}` | Memuat header `X-LiteSpeed-Cache-Control: no-cache` dan `Cache-Control: no-store, private` | P1 | DOCUMENTED | NOT RUN |
+| **TEST-PERF-003** | Footprint memori command agregasi < 64 MB | 10.000 record visits | Eksekusi command agregasi dengan memory profiling | Penggunaan memori puncak tidak melebihi 64 MB (Aman untuk shared hosting 2 GB) | P1 | DOCUMENTED | NOT RUN |
+| **TEST-UX-001** | Responsivitas tampilan mobile viewport 360px | Browser mobile emulation | Render `/s/{slug}` pada lebar layar 360px | Tidak ada elemen horizontal overflow, target sentuh tombol minimal 44x44px | P1 | DOCUMENTED | NOT RUN |
+| **TEST-UX-002** | Kontras warna aksesibilitas WCAG 2.1 AA | Halaman safelink & admin | Audit kontras teks tombol dan label menggunakan Lighthouse | Rasio kontras teks terhadap latar belakang minimal 4.5:1 | P1 | DOCUMENTED | NOT RUN |
+| **TEST-REG-001** | Eksekusi seluruh test suite otomatis | Seluruh modul Phase 1–6 selesai | Jalankan perintah `php artisan test` | 100% Tests PASS (Hijau), 0 Failure, 0 Error | P0 | DOCUMENTED | NOT RUN |
+| **TEST-REG-002** | Integritas migrasi dan skenario kegagalan rollback | Database bersih | Eksekusi `php artisan migrate`, lalu `php artisan migrate:rollback`, lalu `migrate` kembali | Seluruh migrasi dan rollback berjalan bersih tanpa error foreign key | P0 | DOCUMENTED | NOT RUN |
+| **TEST-REG-003** | Simulasi pemulihan kegagalan deployment (Rollback) | Deployment rilis baru gagal di tengah jalan | Jalankan script rollback: restore snapshot database via `mysqldump` & symlink rilis stabil sebelumnya | Database dan sistem kembali ke status operasional stabil tanpa data korup | P0 | DOCUMENTED | NOT RUN |
+
+---
+
+## 2. Contoh Implementasi Automated Feature Test (Laravel 13 / Pest 3)
+
+```php
+namespace Tests\Feature;
+
+use Tests\TestCase;
+use App\Models\Link;
+use App\Models\VisitorSession;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
+
+class SafelinkFlowTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_visitor_cannot_bypass_countdown_timer(): void
+    {
+        // 1. Arrange: Buat link aktif dengan countdown 10 detik
+        $link = Link::create([
+            'slug' => 'photoshop-2026',
+            'destination_url' => 'https://example.com/photoshop.zip',
+            'countdown_seconds' => 10,
+            'status' => 'active',
+        ]);
+
+        // Mock Cloudflare Turnstile API response
+        Http::fake([
+            'https://challenges.cloudflare.com/turnstile/v0/siteverify' => Http::response(['success' => true], 200),
+        ]);
+
+        // 2. Act: Kunjungi halaman safelink
+        $response = $this->get('/s/photoshop-2026');
+        $response->assertStatus(200);
+        $response->assertHeader('X-LiteSpeed-Cache-Control', 'no-cache');
+
+        // Pastikan token disimpan dalam bentuk hash SHA-256 di basis data
+        $session = VisitorSession::where('link_id', $link->id)->first();
+        $this->assertNotNull($session);
+        $this->assertEquals(64, strlen($session->token_hash));
+
+        // Ambil rawToken dari payload view
+        $rawToken = $response->viewData('rawToken');
+        $this->assertEquals($session->token_hash, hash('sha256', $rawToken));
+
+        // Verifikasi Turnstile via AJAX
+        $this->postJson('/s/photoshop-2026/verify', [
+            'raw_token' => $rawToken,
+            'turnstile_token' => 'dummy-valid-turnstile-token',
+        ])->assertJson(['success' => true]);
+
+        // 3. Act Curang: Langsung tembak proceed 1 detik kemudian!
+        $bypassResponse = $this->post('/s/photoshop-2026/proceed', [
+            'raw_token' => $rawToken,
+        ]);
+
+        // 4. Assert: Server menolak dengan kode 422!
+        $bypassResponse->assertStatus(422);
+        $this->assertFalse((bool) $session->fresh()->completed);
+    }
+}
+```
+
+---
+
+## 3. Kriteria Kelulusan Pengujian (Quality Gate)
+
+1. **Test Case Coverage:** Sebanyak **36 Skenario Pengujian Terverifikasi** terpetakan 100% dua arah ke dokumen [REQUIREMENT-TRACEABILITY-MATRIX.md](../REQUIREMENT-TRACEABILITY-MATRIX.md).
+2. **Kondisi Pre-Coding:** Seluruh test case berstatus `DOCUMENTED` dan `NOT RUN`.
+3. **Syarat Kelulusan Phase 7 (Post-Implementation):**
+   - 100% test case berlabel `P0` dan minimal 90% test case berlabel `P1` wajib berstatus **PASS** pada perintah riil `php artisan test`.
+   - Tidak ada kebocoran URL tujuan sebelum verifikasi Turnstile dan countdown selesai.
+   - Perintah `php artisan migrate:fresh --seed` berjalan mulus tanpa kegagalan constraint foreign key.
